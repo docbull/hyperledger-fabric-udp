@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package peer;
+
+option go_package = "github.com/docbull/inlab-d2d/protos/d2d";
+
+// SDNService
+service D2DService {
+        rpc D2DBlockStream(Envelope) returns (Status) {}
+}
+
+// Envelope contains a marshalled
+// GossipMessage and a signature over it.
+// It may also contain a SecretEnvelope
+// which is a marshalled Secret
+message Envelope {
+    bytes payload   = 1;
+    bytes signature = 2;
+    SecretEnvelope secret_envelope = 3;
+}
+
+// SecretEnvelope is a marshalled Secret
+// and a signature over it.
+// The signature should be validated by the peer
+// that signed the Envelope the SecretEnvelope
+// came with
+message SecretEnvelope {
+    bytes payload   = 1;
+    bytes signature = 2;
+}
+
+enum StatusCode {
+        Unknown = 0;
+        Ok = 1;
+        Failed = 2;
+}
+
+message Status {
+        StatusCode Code = 1;
+}
