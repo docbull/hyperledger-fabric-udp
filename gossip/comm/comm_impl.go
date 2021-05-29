@@ -215,7 +215,8 @@ func (c *commImpl) createConnection(endpoint string, expectedPKIID common.PKIidT
 	return nil, errors.WithStack(err)
 }
 
-func (c *commImpl) D2DSend(msg *protoext.SignedGossipMessage, peers ...*RemotePeer) {
+// UDPSend
+func (c *commImpl) UDPSend(msg *protoext.SignedGossipMessage, peers ...*RemotePeer) {
 	if c.isStopping() || len(peers) == 0 {
 		fmt.Println("D2D sending has stopped")
 		return
@@ -224,12 +225,12 @@ func (c *commImpl) D2DSend(msg *protoext.SignedGossipMessage, peers ...*RemotePe
 
 	for _, peer := range peers {
 		go func(peer *RemotePeer, msg *protoext.SignedGossipMessage) {
-			c.sendOverD2D(peer, msg)
+			c.sendOverUDP(peer, msg)
 		}(peer, msg)
 	}
 }
 
-func (c *commImpl) sendOverD2D(peer *RemotePeer, msg *protoext.SignedGossipMessage) {
+func (c *commImpl) sendOverUDP(peer *RemotePeer, msg *protoext.SignedGossipMessage) {
 	fmt.Println("Send a block to D2D container")
 
 	d2dIP := os.Getenv("D2D_IP_ADDRESS")

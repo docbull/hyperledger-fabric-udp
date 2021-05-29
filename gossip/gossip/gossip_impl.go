@@ -300,7 +300,6 @@ func (g *Node) syncDiscovery() {
 
 // sendEndpoint sends Endpoint to SDN Client
 func (g *Node) sendEndpoint(hostIP string) {
-	// Connect to SDN Client IP
 	conn, err := net.Dial("tcp", hostIP+":8000")
 	if err != nil {
 		log.Println(err)
@@ -320,7 +319,7 @@ func (g *Node) sendEndpoint(hostIP string) {
 	}
 }
 
-// sendEndpoint establish connection for getting docker swarm virtual IP
+// sendEndpoint establish connection with UDP module
 func (g *Node) sendRemoteAddr(hostIP string) {
 	conn, err := net.Dial("tcp", hostIP+":20000")
 	if err != nil {

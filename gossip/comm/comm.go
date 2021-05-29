@@ -26,8 +26,8 @@ type Comm interface {
 	// Send sends a message to remote peers asynchronously
 	Send(msg *protoext.SignedGossipMessage, peers ...*RemotePeer)
 
-	// D2D sends a message to another D2D container
-	D2DSend(msg *protoext.SignedGossipMessage, peers ...*RemotePeer)
+	// UDP sends a message to UDP container
+	UDPSend(msg *protoext.SignedGossipMessage, peers ...*RemotePeer)
 
 	// SendWithAck sends a message to remote peers, waiting for acknowledgement from minAck of them, or until a certain timeout expires
 	SendWithAck(msg *protoext.SignedGossipMessage, timeout time.Duration, minAck int, peers ...*RemotePeer) AggregatedSendResult
