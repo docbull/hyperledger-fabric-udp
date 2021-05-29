@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package overlay;
+
+option go_package = "inlab-sdn/protos/overlay";
+
+service OverlayStructureService {
+    rpc SeeOverlayStructure(PeerEndpoint) returns (OverlayStructure) {}
+}
+
+message PeerEndpoint {
+    string Endpoint = 1;
+}
+
+message OverlayStructure {
+    string SuperPeer = 1;
+    string Endpoint = 2;
+    repeated string SubPeers = 3;
+}

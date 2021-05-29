@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package peer;
+
+option go_package = "inlab-sdn/protos/peer";
+
+// SDNService
+service SDNService {
+        rpc StorePeerInformation(PeerConnection) returns (Status) {}
+        rpc UpdateOverlayStructure(PeerInfo) returns (OverlayStructure) {}
+}
+
+// Indivisual information of the peers
+message PeerConnection {
+        PeerInfo Mobile = 1;
+        PeerInfo D2D = 2;
+}
+
+message PeerInfo {
+        string Endpoint = 1;
+        NetworkInfo NetInfo = 2;
+}
+
+message NetworkInfo {
+        string NetworkInterface = 1;
+        float NetworkStrength = 2;
+}
+
+message OverlayStructure {
+        string SuperPeer = 1;
+        string Endpoint = 2;
+        repeated string SubPeers = 3;
+}
+
+enum StatusCode {
+        Unknown = 0;
+        Ok = 1;
+        Failed = 2;
+}
+
+message Status {
+        StatusCode Code = 1;
+}
