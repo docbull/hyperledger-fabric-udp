@@ -1,10 +1,8 @@
-module github.com/docbull/inlab-fabric/inlab-d2d
+module github.com/docbull/hyperledger-fabric-udp/inlab-udp
 
-go 1.15
+go 1.16
 
 require (
-	github.com/docbull/inlab-fabric-modules v0.0.0-20210405044429-51115bca6685
-	github.com/golang/protobuf v1.5.2
-	github.com/hyperledger/fabric-protos-go v0.0.0-20210318103044-13fdee960194
-	google.golang.org/grpc v1.37.0
+	github.com/docbull/inlab-fabric-udp-proto v0.0.0-20210530052143-f04241ac7a7a
+	google.golang.org/grpc v1.38.0
 )
