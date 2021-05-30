@@ -75,6 +75,9 @@ github.com/davecgh/go-spew/spew
 # github.com/docbull/inlab-fabric-modules v0.0.0-20210405044429-51115bca6685
 ## explicit
 github.com/docbull/inlab-fabric-modules/inlab-sdn/protos/overlay
+# github.com/docbull/inlab-fabric-udp-proto v0.0.0-20210530052143-f04241ac7a7a
+## explicit
+github.com/docbull/inlab-fabric-udp-proto
 # github.com/docker/docker v20.10.0-beta1.0.20201113105859-b6bfff2a628f+incompatible
 github.com/docker/docker/api/types/blkiodev
 github.com/docker/docker/api/types/container
