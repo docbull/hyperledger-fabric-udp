@@ -71,6 +71,33 @@ func SelectPeers(k int, peerPool []discovery.NetworkMember, filter RoutingFilter
 	return res
 }
 
+// SelectPeers2 returns peer information that is included its subnode.
+func SelectPeers2(peerName string, peerPool []discovery.NetworkMember, filter RoutingFilter) []*comm.RemotePeer {
+	var res []*comm.RemotePeer
+
+	for index := 0; index < len(peerPool); index++ {
+		peer := peerPool[index]
+
+		if peerName == "peer0.org1.example.com:7051" {
+			if peer.Endpoint == "peer1.org1.example.com:7051" {
+				if filter(peer) {
+					p := &comm.RemotePeer{PKIID: peer.PKIid, Endpoint: peer.PreferredEndpoint()}
+					res = append(res, p)
+				}
+			}
+		}
+	}
+
+	fmt.Println("-------Selected Peers-------")
+	fmt.Println(time.Now())
+	for i := 0; i < len(res); i++ {
+		fmt.Println(res[i].Endpoint)
+	}
+	fmt.Println("----------------------------")
+
+	return res
+}
+
 // GetOverlay connects to SDN Client to get Overlay Structure
 func GetOverlay(peerName string) *overlay.OverlayStructure {
 	hostIP := os.Getenv("IP_ADDRESS")

@@ -12,14 +12,14 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
-	"net"
+	"log"
 	"os"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	protoG "github.com/golang/protobuf/proto"
+	udp "github.com/docbull/inlab-fabric-udp-proto"
 	proto "github.com/hyperledger/fabric-protos-go/gossip"
 	"github.com/hyperledger/fabric/gossip/api"
 	"github.com/hyperledger/fabric/gossip/common"
@@ -225,40 +225,57 @@ func (c *commImpl) UDPSend(msg *protoext.SignedGossipMessage, peers ...*RemotePe
 
 	for _, peer := range peers {
 		go func(peer *RemotePeer, msg *protoext.SignedGossipMessage) {
-			c.sendOverUDP(peer, msg)
+			c.sendToUDPContainer(peer, msg)
 		}(peer, msg)
 	}
 }
 
-func (c *commImpl) sendOverUDP(peer *RemotePeer, msg *protoext.SignedGossipMessage) {
-	fmt.Println("Send a block to D2D container")
+func (c *commImpl) sendToUDPContainer(peer *RemotePeer, msg *protoext.SignedGossipMessage) {
+	fmt.Println("Send the block to UDP container")
 
-	d2dIP := os.Getenv("D2D_IP_ADDRESS")
-	// Set D2D container's IP address
-	conn, err := net.Dial("tcp", d2dIP+":11800")
+	hostIP := os.Getenv("IP_ADDRESS") + ":11800"
+
+	conn, err := grpc.Dial(hostIP, grpc.WithInsecure())
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
 	defer conn.Close()
 
-	fmt.Println()
-	fmt.Println(time.Now(), "Data Msg send to D2D container")
-	fmt.Println()
+	udpClient := udp.NewUDPServiceClient(conn)
 
-	envelope, err := protoG.Marshal(msg.Envelope)
+	envelopeForUDP := udp.Envelope{}
+	if msg.SecretEnvelope != nil {
+		secretEnvelopeForUDP := udp.SecretEnvelope{
+			Payload:   msg.SecretEnvelope.Payload,
+			Signature: msg.SecretEnvelope.Signature,
+		}
+		envelopeForUDP = udp.Envelope{
+			Payload:        msg.Envelope.Payload,
+			Signature:      msg.Envelope.Signature,
+			SecretEnvelope: &secretEnvelopeForUDP,
+		}
+	} else {
+		envelopeForUDP = udp.Envelope{
+			Payload:        msg.Envelope.Payload,
+			Signature:      msg.Envelope.Signature,
+			SecretEnvelope: nil,
+		}
+	}
+
+	fmt.Println(msg.Envelope)
+
+	res, err := udpClient.BlockDataForUDP(context.Background(), &envelopeForUDP)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println("Marshalled data size:", len(envelope))
-
-	n, err := conn.Write(envelope)
-	if err != nil {
-		fmt.Println(err)
+	if res.Code != udp.StatusCode_Ok {
+		log.Println(res.Code)
 		return
+	} else {
+		fmt.Println("Block has sent to the UDP container")
 	}
-	fmt.Println("Wrote data size:", n)
 
 	c.metrics.SentMessages.Add(1)
 }

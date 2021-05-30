@@ -654,7 +654,7 @@ func (g *Node) gossipInChan(messages []*emittedGossipMessage, chanRoutingFactory
 		// For leadership messages we will select all peers that pass routing factory - e.g. all peers in channel and org
 		membership := g.disc.GetMembership()
 		var peerName = ""
-		var isD2D = false
+		//var isD2D = false
 		var peers2Send []*comm.RemotePeer
 		if protoext.IsLeadershipMsg(messagesOfChannel[0].GossipMessage) {
 			peers2Send = filter.SelectPeers(len(membership), membership, chanRoutingFactory(gc))
@@ -663,14 +663,22 @@ func (g *Node) gossipInChan(messages []*emittedGossipMessage, chanRoutingFactory
 			fmt.Println("Peer name:", peerName)
 			newMembership := g.myMem.getMember()
 
-			peers2Send, isD2D = filter.SelectPeersWithinOverlayStructure(peerName, newMembership, chanRoutingFactory(gc))
-			if isD2D {
-				for _, msg := range messagesOfChannel {
-					filteredPeers := g.removeSelfLoop(msg, peers2Send)
-					g.comm.D2DSend(msg.SignedGossipMessage, filteredPeers...)
-				}
-				return
+			peers2Send = filter.SelectPeers2(peerName, newMembership, chanRoutingFactory(gc))
+			for _, msg := range messagesOfChannel {
+				filteredPeers := g.removeSelfLoop(msg, peers2Send)
+				g.comm.UDPSend(msg.SignedGossipMessage, filteredPeers...)
 			}
+			return
+			/*
+				peers2Send, isD2D = filter.SelectPeersWithinOverlayStructure(peerName, newMembership, chanRoutingFactory(gc))
+				if isD2D {
+					for _, msg := range messagesOfChannel {
+						filteredPeers := g.removeSelfLoop(msg, peers2Send)
+						g.comm.UDPSend(msg.SignedGossipMessage, filteredPeers...)
+					}
+					return
+				}
+			*/
 		} else {
 			peers2Send = filter.SelectPeers(g.conf.PropagatePeerNum, membership, chanRoutingFactory(gc))
 		}
