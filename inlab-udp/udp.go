@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -8,6 +9,8 @@ import (
 	"strings"
 
 	udp "github.com/docbull/inlab-fabric-udp-proto"
+	protoG "github.com/golang/protobuf/proto"
+	proto "github.com/hyperledger/fabric-protos-go/gossip"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -41,12 +44,84 @@ func (msg *Message) WaitPeerConnection() {
 	}
 }
 
+func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, n int) {
+	_, err := conn.WriteToUDP([]byte(string(n)), addr)
+	if err != nil {
+		fmt.Printf("Couldn't send response %v", err)
+	}
+}
+
+func (msg *Message) UDPServerListen() {
+	envelope := make([]byte, 0)
+	buf := make([]byte, 1024*10)
+
+	addr := net.UDPAddr{
+		IP:   net.ParseIP("127.0.0.1"),
+		Port: 8000,
+	}
+	serv, err := net.ListenUDP("udp", &addr)
+	if err != nil {
+		fmt.Printf("Some error %v\n", err)
+		return
+	}
+	for {
+		n, remoteaddr, err := serv.ReadFromUDP(buf)
+		if err != nil {
+			fmt.Printf("Some error  %v", err)
+			continue
+		}
+
+		envelope = append(envelope, buf[:n]...)
+
+		protoEnvelope := &proto.Envelope{}
+		err = protoG.Unmarshal(envelope[:n], protoEnvelope)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		go msg.SendResponse(serv, remoteaddr, n)
+	}
+}
+
+func (msg *Message) UDPBlockSender() {
+	conn, err := net.Dial("udp", "192.168.1.2:8000")
+	if err != nil {
+		fmt.Printf("Some error %v", err)
+		return
+	}
+	defer conn.Close()
+
+	envelope, err := protoG.Marshal(msg.Block)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("Marshalled data size:", len(envelope))
+
+	n, err := conn.Write(envelope)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("Wrote data size:", n)
+
+	p := make([]byte, 2048)
+	_, err = bufio.NewReader(conn).Read(p)
+	if err != nil {
+		fmt.Printf("Some error %v\n", err)
+	}
+	log.Println("Received size of the block:", string(p))
+}
+
 func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope) (*udp.Status, error) {
 	log.Println("Receive Block data from the Peer container")
 
 	msg.Block.Payload = envelope.Payload
 	msg.Block.Signature = envelope.Signature
 	msg.Block.SecretEnvelope = envelope.SecretEnvelope
+
+	go msg.UDPBlockSender()
 
 	return &udp.Status{Code: udp.StatusCode_Ok}, nil
 }
