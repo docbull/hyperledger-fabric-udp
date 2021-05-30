@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -44,8 +43,8 @@ func (msg *Message) WaitPeerConnection() {
 	}
 }
 
-func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, n int) {
-	_, err := conn.WriteToUDP([]byte(string(n)), addr)
+func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, length string) {
+	_, err := conn.WriteToUDP([]byte(length), addr)
 	if err != nil {
 		fmt.Printf("Couldn't send response %v", err)
 	}
@@ -56,7 +55,7 @@ func (msg *Message) UDPServerListen() {
 	buf := make([]byte, 1024*10)
 
 	addr := net.UDPAddr{
-		IP:   net.ParseIP("127.0.0.1"),
+		IP:   net.ParseIP("0.0.0.0"),
 		Port: 8000,
 	}
 	serv, err := net.ListenUDP("udp", &addr)
@@ -67,20 +66,23 @@ func (msg *Message) UDPServerListen() {
 	for {
 		n, remoteaddr, err := serv.ReadFromUDP(buf)
 		if err != nil {
-			fmt.Printf("Some error  %v", err)
+			fmt.Printf("Some error %v", err)
 			continue
 		}
+		log.Println("Received a Block from", remoteaddr)
+		log.Println("Received size of Block data:", n)
 
 		envelope = append(envelope, buf[:n]...)
 
 		protoEnvelope := &proto.Envelope{}
-		err = protoG.Unmarshal(envelope[:n], protoEnvelope)
+		err = protoG.Unmarshal(envelope, protoEnvelope)
 		if err != nil {
-			log.Println(err)
-			return
+			log.Println("Unmarshal error:", err)
+			continue
 		}
+		length := string(n)
 
-		go msg.SendResponse(serv, remoteaddr, n)
+		go msg.SendResponse(serv, remoteaddr, length)
 	}
 }
 
@@ -106,12 +108,14 @@ func (msg *Message) UDPBlockSender() {
 	}
 	fmt.Println("Wrote data size:", n)
 
-	p := make([]byte, 2048)
-	_, err = bufio.NewReader(conn).Read(p)
-	if err != nil {
-		fmt.Printf("Some error %v\n", err)
-	}
-	log.Println("Received size of the block:", string(p))
+	/*
+		p := make([]byte, 2048)
+		_, err = bufio.NewReader(conn).Read(p)
+		if err != nil {
+			fmt.Printf("Some error %v\n", err)
+		}
+		log.Println("Received size of the block:", string(p))
+	*/
 }
 
 func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope) (*udp.Status, error) {
@@ -158,6 +162,7 @@ func start() {
 
 	// waiting Peer containers' connection
 	go msg.Peer2UDP()
+	go msg.UDPServerListen()
 
 	// waiting D2D containers' connection
 	go msg.WaitPeerConnection()
