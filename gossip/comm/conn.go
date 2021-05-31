@@ -141,6 +141,8 @@ func (cs *connectionStore) getConnection(peer *RemotePeer) (*connection, error) 
 	conn = createdConnection
 	cs.pki2Conn[string(createdConnection.pkiID)] = conn
 
+	conn.peerEndpoint = peer.Endpoint
+
 	if conn.peerEndpoint != "" {
 		hostIP := os.Getenv("IP_ADDRESS")
 		grpcConn, err := grpc.Dial(hostIP+":8080", grpc.WithInsecure())
