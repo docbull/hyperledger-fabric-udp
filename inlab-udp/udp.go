@@ -126,6 +126,8 @@ func (msg *Message) UDPServerListen() {
 
 		length := string(n)
 		go msg.SendResponse(serv, remoteaddr, length)
+
+		go msg.SendBlock2Peer()
 	}
 }
 
