@@ -373,10 +373,8 @@ func (conn *connection) serviceConnection() error {
 	conn.errChan = &errChan
 	conn.msgChan = &msgChan
 
-	if conn.isD2D {
-		fmt.Println("Block Receiver with", conn.peerEndpoint)
-		go conn.D2DBlockReceiver()
-	}
+	fmt.Println("Block Receiver with", conn.peerEndpoint)
+	go conn.D2DBlockReceiver()
 
 	// Call stream.Recv() asynchronously in readFromStream(),
 	// and wait for either the Recv() call to end,

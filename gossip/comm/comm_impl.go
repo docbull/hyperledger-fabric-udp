@@ -263,8 +263,6 @@ func (c *commImpl) sendToUDPContainer(peer *RemotePeer, msg *protoext.SignedGoss
 		}
 	}
 
-	fmt.Println(msg.Envelope)
-
 	res, err := udpClient.BlockDataForUDP(context.Background(), &envelopeForUDP)
 	if err != nil {
 		fmt.Println(err)
