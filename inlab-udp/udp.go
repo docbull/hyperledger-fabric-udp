@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -43,6 +44,46 @@ func (msg *Message) WaitPeerConnection() {
 	}
 }
 
+func (msg *Message) SendBlock2Peer() {
+	peer2D2DBlockIP := msg.PeerContainerIP + ":16220"
+	conn, err := net.Dial("tcp", peer2D2DBlockIP)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer conn.Close()
+
+	protoEnvelope := proto.Envelope{
+		Payload:   msg.Block.Payload,
+		Signature: msg.Block.Signature,
+	}
+
+	envelope, err := protoG.Marshal(&protoEnvelope)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	n, err := conn.Write(envelope)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("-----------------------------")
+	fmt.Println("Size of Block Data:", n)
+	fmt.Println("-----------------------------")
+
+	recvBuf := make([]byte, 64)
+	conn.Read(recvBuf)
+	resMsg := string(recvBuf)
+
+	fmt.Println("Received message from the Peer:", resMsg)
+	if strings.Contains(resMsg, "error") {
+		fmt.Println("Re-send the block")
+
+		go msg.SendBlock2Peer()
+	}
+}
+
 func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, length string) {
 	_, err := conn.WriteToUDP([]byte(length), addr)
 	if err != nil {
@@ -80,8 +121,10 @@ func (msg *Message) UDPServerListen() {
 			log.Println("Unmarshal error:", err)
 			continue
 		}
-		length := string(n)
+		msg.Block.Payload = protoEnvelope.Payload
+		msg.Block.Signature = protoEnvelope.Signature
 
+		length := string(n)
 		go msg.SendResponse(serv, remoteaddr, length)
 	}
 }
@@ -108,14 +151,12 @@ func (msg *Message) UDPBlockSender() {
 	}
 	fmt.Println("Wrote data size:", n)
 
-	/*
-		p := make([]byte, 2048)
-		_, err = bufio.NewReader(conn).Read(p)
-		if err != nil {
-			fmt.Printf("Some error %v\n", err)
-		}
-		log.Println("Received size of the block:", string(p))
-	*/
+	p := make([]byte, 2048)
+	_, err = bufio.NewReader(conn).Read(p)
+	if err != nil {
+		fmt.Printf("Some error %v\n", err)
+	}
+	log.Println("Received size of the block:", string(p))
 }
 
 func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope) (*udp.Status, error) {
