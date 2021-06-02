@@ -218,10 +218,10 @@ func (c *commImpl) createConnection(endpoint string, expectedPKIID common.PKIidT
 // UDPSend
 func (c *commImpl) UDPSend(msg *protoext.SignedGossipMessage, peers ...*RemotePeer) {
 	if c.isStopping() || len(peers) == 0 {
-		fmt.Println("D2D sending has stopped")
+		fmt.Println("No one send the data msg to")
 		return
 	}
-	c.logger.Debug("Entering, D2D sending", msg, "to ", len(peers), "peers")
+	c.logger.Debug("Entering, UDP sending", msg, "to ", len(peers), "peers")
 
 	for _, peer := range peers {
 		go func(peer *RemotePeer, msg *protoext.SignedGossipMessage) {
@@ -231,7 +231,7 @@ func (c *commImpl) UDPSend(msg *protoext.SignedGossipMessage, peers ...*RemotePe
 }
 
 func (c *commImpl) sendToUDPContainer(peer *RemotePeer, msg *protoext.SignedGossipMessage) {
-	fmt.Println("Send the block to UDP container")
+	log.Println("Send the block to UDP container")
 
 	hostIP := os.Getenv("IP_ADDRESS") + ":11800"
 
@@ -272,7 +272,7 @@ func (c *commImpl) sendToUDPContainer(peer *RemotePeer, msg *protoext.SignedGoss
 		log.Println(res.Code)
 		return
 	} else {
-		fmt.Println("Block has sent to the UDP container")
+		log.Println("Block has sent to the UDP container")
 	}
 
 	c.metrics.SentMessages.Add(1)

@@ -308,7 +308,7 @@ func (conn *connection) send(msg *protoext.SignedGossipMessage, onErr func(error
 }
 
 // D2DBlockReceiver receives block data from D2D container (i.g., SDN Client)
-func (conn *connection) D2DBlockReceiver() {
+func (conn *connection) UDPBlockReceiver() {
 	lis, err := net.Listen("tcp", ":16220")
 	if err != nil {
 		log.Println(err)
@@ -316,7 +316,7 @@ func (conn *connection) D2DBlockReceiver() {
 	}
 	defer lis.Close()
 
-	fmt.Println("Ready to receive block upon D2D interface")
+	fmt.Println("Ready to receive data msg over UDP")
 
 	for {
 		sock, err := lis.Accept()
@@ -326,11 +326,11 @@ func (conn *connection) D2DBlockReceiver() {
 		}
 		defer sock.Close()
 
-		go conn.HandleD2DBlock(sock)
+		go conn.HandleUDPBlock(sock)
 	}
 }
 
-func (conn *connection) HandleD2DBlock(sock net.Conn) {
+func (conn *connection) HandleUDPBlock(sock net.Conn) {
 	envelope := make([]byte, 1024*1024)
 	length, err := sock.Read(envelope)
 	if err != nil {
@@ -376,7 +376,7 @@ func (conn *connection) serviceConnection() error {
 	conn.msgChan = &msgChan
 
 	fmt.Println("Block Receiver with", conn.peerEndpoint)
-	go conn.D2DBlockReceiver()
+	go conn.UDPBlockReceiver()
 
 	// Call stream.Recv() asynchronously in readFromStream(),
 	// and wait for either the Recv() call to end,

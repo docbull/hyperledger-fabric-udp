@@ -6,7 +6,7 @@ option go_package = "github.com/docbull/hyperledger-fabric-udp/inlab-udp";
 
 // UDPService
 service UDPService {
-        rpc D2DBlockStream(Envelope) returns (Status) {}
+        rpc BlockDataForUDP(Envelope) returns (Status) {}
 }
 
 // Envelope contains a marshalled

@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package msp;
+
+option go_package = "inlab-udp/protos/msp";
+
+service UDPMSPService {
+        rpc HeartbeatMsg(Empty) returns (Membership) {}
+}
+
+message Membership {
+        repeated PeerInfo UDPMember = 1;
+}
+
+message PeerInfo {
+        string Endpoint = 1;
+        string IPAddress = 2;
+}
+
+message Empty {
+
+}
+
+enum StatusCode {
+        Unknown = 0;
+        Ok = 1;
+        Failed = 2;
+}
+
+message Status {
+        StatusCode Code = 1;
+}
+
