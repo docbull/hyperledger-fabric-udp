@@ -5,7 +5,8 @@ package msp;
 option go_package = "inlab-udp/protos/msp";
 
 service UDPMSPService {
-        rpc HeartbeatMsg(Empty) returns (Membership) {}
+        rpc HeartbeatMsg(Empty) returns (Status) {}
+        rpc MembershipProvider(PeerInfo) returns (Membership) {}
 }
 
 message Membership {
@@ -13,8 +14,12 @@ message Membership {
 }
 
 message PeerInfo {
-        string Endpoint = 1;
+        Endpoint PeerName = 1;
         string IPAddress = 2;
+}
+
+message Endpoint {
+        string PeerEndpoint = 1;
 }
 
 message Empty {
@@ -30,4 +35,3 @@ enum StatusCode {
 message Status {
         StatusCode Code = 1;
 }
-
