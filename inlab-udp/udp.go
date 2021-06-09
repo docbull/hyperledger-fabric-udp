@@ -25,11 +25,15 @@ type Message struct {
 }
 
 type AttrMsg struct {
-	Size     int
-	Cnt      int
+	Size int
+	Cnt  int
+}
+
+type UDPEnvelope struct {
 	Envelope []byte
 }
 
+var UDPenvelope UDPEnvelope
 var attr AttrMsg
 
 func (msg *Message) WaitPeerConnection() {
@@ -89,29 +93,45 @@ func (msg *Message) SendBlock2Peer() {
 	resMsg := string(recvBuf)
 
 	fmt.Println("Received message from the Peer:", resMsg)
-	if strings.Contains(resMsg, "error") {
-		fmt.Println("Re-send the block")
 
-		go msg.SendBlock2Peer()
-	}
+	UDPenvelope.Envelope = UDPenvelope.Envelope[:0]
 }
 
-func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, length string) {
-	_, err := conn.WriteToUDP([]byte(length), addr)
+func (msg *Message) UDPBlockHandler() {
+	protoEnvelope := &proto.Envelope{}
+
+	fmt.Println("--------- UDP Block Handler ---------")
+	fmt.Println("Block size with padding:", len(UDPenvelope.Envelope))
+	UDPenvelope.Envelope = UDPenvelope.Envelope[:attr.Size]
+	fmt.Println("Block size without padding:", len(UDPenvelope.Envelope))
+	fmt.Println("-------------------------------------")
+
+	err := protoG.Unmarshal(UDPenvelope.Envelope, protoEnvelope)
+	if err != nil {
+		log.Println("Unmarshal error:", err)
+		return
+	}
+	msg.Block.Payload = protoEnvelope.Payload
+	msg.Block.Signature = protoEnvelope.Signature
+
+	go msg.SendBlock2Peer()
+}
+
+func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, res string) {
+	_, err := conn.WriteToUDP([]byte(res), addr)
 	if err != nil {
 		fmt.Printf("Couldn't send response %v", err)
 	}
 }
 
 func (msg *Message) handleUDPConnection(serv *net.UDPConn) {
-	// RT decoding, 128 symbols and 7 extra symbols
+	// RT decoding, 64 symbols and 5 extra symbols
 	codec := fountain.NewRaptorCodec(128, 7)
 	dec := codec.NewDecoder(128)
 	var encSymbols []fountain.LTBlock
 
 	// envelope for block unmarshalling
 	// buf for receiving RT symbols of block
-	envelope := make([]byte, 0)
 	buf := make([]byte, 1024*10)
 
 	n, remoteaddr, err := serv.ReadFromUDP(buf)
@@ -125,14 +145,13 @@ func (msg *Message) handleUDPConnection(serv *net.UDPConn) {
 	log.Println("Received size of the Block data:", n)
 
 	if n < 30 {
-		// Useless codes in here
+		// receiving block size
 		err := json.Unmarshal(buf, &attr)
 		if err != nil {
 			panic(err)
 		}
-		attr.Envelope = make([]byte, 0)
 
-		fmt.Println("Block size:", attr.Size)
+		fmt.Println("Received Block Size:", attr.Size)
 	} else {
 		// receiving encoding symbol slices
 		err = json.Unmarshal(buf, &encSymbols)
@@ -144,26 +163,23 @@ func (msg *Message) handleUDPConnection(serv *net.UDPConn) {
 		errCheck := decoder(encSymbols, codec, dec)
 		if errCheck != nil {
 			fmt.Println("Complete recovery!")
+			attr.Cnt += len(errCheck)
+			fmt.Println("attr.Cnt:", attr.Cnt)
 
-			length := string(n)
-			go msg.SendResponse(serv, remoteaddr, length)
+			res := "received"
+			go msg.SendResponse(serv, remoteaddr, res)
 
-			envelope = append(envelope, buf[:n]...)
+			UDPenvelope.Envelope = append(UDPenvelope.Envelope, errCheck[:len(errCheck)]...)
+			if attr.Cnt >= attr.Size {
+
+				fmt.Println("************")
+				fmt.Println("END OF BLOCK")
+				fmt.Println("************")
+
+				msg.UDPBlockHandler()
+			}
 		}
 	}
-
-	//envelope = append(envelope, buf[:n]...)
-
-	protoEnvelope := &proto.Envelope{}
-	err = protoG.Unmarshal(envelope, protoEnvelope)
-	if err != nil {
-		log.Println("Unmarshal error:", err)
-		return
-	}
-	msg.Block.Payload = protoEnvelope.Payload
-	msg.Block.Signature = protoEnvelope.Signature
-
-	go msg.SendBlock2Peer()
 }
 
 func (msg *Message) UDPServerListen() {
@@ -179,7 +195,7 @@ func (msg *Message) UDPServerListen() {
 	defer serv.Close()
 
 	for {
-		go msg.handleUDPConnection(serv)
+		msg.handleUDPConnection(serv)
 	}
 }
 
@@ -191,6 +207,9 @@ func (msg *Message) UDPBlockSender() {
 	}
 	defer conn.Close()
 
+	symbols := 128
+	extraSymbols := 7
+
 	envelope, err := protoG.Marshal(msg.Block)
 	if err != nil {
 		fmt.Println(err)
@@ -199,9 +218,9 @@ func (msg *Message) UDPBlockSender() {
 	fmt.Println("Marshalled data size:", len(envelope))
 
 	// Raptor encoding
-	codec := fountain.NewRaptorCodec(128, 7)
+	codec := fountain.NewRaptorCodec(symbols, extraSymbols)
 
-	// send block size
+	// sent block size first
 	attrMsg := AttrMsg{Size: len(envelope), Cnt: 0}
 	d, err := json.Marshal(attrMsg)
 	if err != nil {
@@ -212,71 +231,50 @@ func (msg *Message) UDPBlockSender() {
 		log.Println(err)
 	}
 
-	iter := int(math.Ceil(float64(len(envelope)) / float64(128)))
+	iter := int(math.Ceil(float64(len(envelope)) / float64(symbols)))
 
-	//var start, end int
+	var start, end int
 	var ltBlks []fountain.LTBlock
 
-	index := make([]int64, 128+7)
-	for i := 0; i < iter; i++ {
+	index := make([]int64, symbols+extraSymbols)
+	for i := 0; i < symbols+extraSymbols; i++ {
 		index[i] = int64(i)
 	}
 
-	ltBlks = fountain.EncodeLTBlocks(envelope, index, codec)
-
-	message, err := json.Marshal(ltBlks)
-	if err != nil {
-		log.Fatal(err)
-	}
-	n, err := conn.Write(message)
-	if err != nil {
-		log.Println(err)
-	}
-	fmt.Println("Wrote data size:", n)
-
-	/*
-		for i := 0; i < iter; i++ {
-			start = (128 * i)
-			end = (128 * (i + 1))
-			slice := envelope[start:end]
-
-			ltBlks = fountain.EncodeLTBlocks(slice, index, codec)
-	*/
-	/*
-		// force to raise error
-		ltBlks = append(ltBlks[:46], ltBlks[:134]...)
-		fmt.Println("Error has occured! length of the block:", len(ltBlks))
-	*/
-	/*
-			// write a message
-			msg, err := json.Marshal(ltBlks)
-			if err != nil {
-				log.Fatal(err)
-			}
-			n, err := conn.Write(msg)
-			if err != nil {
-				log.Println(err)
-			}
-			fmt.Println("Wrote data size:", n)
+	sum := 0
+	for i := 0; i < iter; i++ {
+		if (sum + symbols) > len(envelope) {
+			start = end
+			end = len(envelope)
+			sum += (end - start)
+		} else {
+			start = (symbols * i)
+			end = (symbols * (i + 1))
+			sum += symbols
 		}
-	*/
+		slice := envelope[start:end]
 
-	/*
-		n, err := conn.Write(envelope)
+		ltBlks = fountain.EncodeLTBlocks(slice, index, codec)
+		ltBlks = append(ltBlks[:46], ltBlks[50:134]...)
+
+		message, err := json.Marshal(ltBlks)
 		if err != nil {
-			fmt.Println(err)
-			return
+			log.Fatal(err)
 		}
-		fmt.Println("Wrote data size:", n)
-	*/
+		_, err = conn.Write(message)
+		if err != nil {
+			log.Println(err)
+		}
+		fmt.Println("Wrote data size:", sum)
 
-	p := make([]byte, 1024)
-	_, err = bufio.NewReader(conn).Read(p)
-	if err != nil {
-		fmt.Printf("Some error %v\n", err)
+		p := make([]byte, 1024)
+		_, err = bufio.NewReader(conn).Read(p)
+		if err != nil {
+			fmt.Printf("Some error %v\n", err)
+		}
+		resMsg := string(p)
+		log.Println("Received size of the block:", resMsg)
 	}
-	resMsg := string(p)
-	log.Println("Received size of the block:", resMsg)
 }
 
 func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope) (*udp.Status, error) {
@@ -325,6 +323,8 @@ func start() {
 		Signature:      nil,
 		SecretEnvelope: nil,
 	}
+
+	UDPenvelope.Envelope = make([]byte, 0)
 
 	// waiting Peer containers' connection
 	go msg.Peer2UDP()
