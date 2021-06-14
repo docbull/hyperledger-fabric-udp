@@ -300,7 +300,7 @@ func (msg *Message) UDPBlockSender() {
 	fmt.Println("Marshalled data size:", len(envelope))
 
 	// Raptor encoding
-	codec := fountain.NewRaptorCodec(symbols, 4)
+	codec := fountain.NewRaptorCodec(symbols, symbolSize)
 
 	// sent block size first
 	attrMsg := AttrMsg{Size: len(envelope), Cnt: 0}
@@ -329,21 +329,29 @@ func (msg *Message) UDPBlockSender() {
 	var encodingTime time.Duration
 	var desTime time.Duration
 
+	// slices for sending RT symbols
+	var slice []byte
+
 	startTime := time.Now()
 	for i := 0; i < iter; i++ {
 		if (sum + (symbols * symbolSize)) > len(envelope) {
 			start = end
 			end = len(envelope)
+			slice = envelope[start:end]
+
+			padding := make([]byte, (sum+(symbols*symbolSize))-len(envelope))
+			slice = append(slice, padding...)
+			fmt.Println("size of slice:", len(slice))
+
 			sum += (end - start)
 		} else {
 			start = ((symbols * symbolSize) * i)
 			end = ((symbols * symbolSize) * (i + 1))
 			sum += (symbols * symbolSize)
+			slice = envelope[start:end]
 		}
 		fmt.Println("start:", start)
 		fmt.Println("end:", end)
-		slice := envelope[start:end]
-		fmt.Println("size of slice:", len(slice))
 
 		startEncoding := time.Now()
 		ltBlks = fountain.EncodeLTBlocks(slice, index, codec)
