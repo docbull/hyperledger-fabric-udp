@@ -186,7 +186,7 @@ func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, res strin
 func (msg *Message) handleUDPConnection(serv *net.UDPConn) {
 	// RT decoding, 128 symbols
 	codec := fountain.NewRaptorCodec(128, 4)
-	dec := codec.NewDecoder(128 * 4)
+	dec := codec.NewDecoder(128)
 	var encSymbols []fountain.LTBlock
 
 	// envelope for block unmarshalling
@@ -289,6 +289,7 @@ func (msg *Message) UDPBlockSender() {
 	defer conn.Close()
 
 	symbols := 128
+	symbolSize := 4
 	redundancySymbols := 7
 
 	envelope, err := protoG.Marshal(msg.Block)
@@ -312,14 +313,14 @@ func (msg *Message) UDPBlockSender() {
 		log.Println(err)
 	}
 
-	iter := int(math.Ceil(float64(len(envelope)) / (float64(symbols) * 4)))
+	iter := int(math.Ceil(float64(len(envelope)) / (float64(symbols) * float64(symbolSize))))
 	fmt.Println("iter:", iter)
 
 	var start, end int
 	var ltBlks []fountain.LTBlock
 
-	index := make([]int64, (symbols*4)+redundancySymbols)
-	for i := 0; i < (symbols*4)+redundancySymbols; i++ {
+	index := make([]int64, (symbols*symbolSize)+redundancySymbols)
+	for i := 0; i < (symbols*symbolSize)+redundancySymbols; i++ {
 		index[i] = int64(i)
 	}
 
@@ -330,14 +331,14 @@ func (msg *Message) UDPBlockSender() {
 
 	startTime := time.Now()
 	for i := 0; i < iter; i++ {
-		if (sum + (symbols * 4)) > len(envelope) {
+		if (sum + (symbols * symbolSize)) > len(envelope) {
 			start = end
 			end = len(envelope)
 			sum += (end - start)
 		} else {
-			start = ((symbols * 4) * i)
-			end = ((symbols * 4) * (i + 1))
-			sum += (symbols * 4)
+			start = ((symbols * symbolSize) * i)
+			end = ((symbols * symbolSize) * (i + 1))
+			sum += (symbols * symbolSize)
 		}
 		fmt.Println("start:", start)
 		fmt.Println("end:", end)
@@ -350,7 +351,7 @@ func (msg *Message) UDPBlockSender() {
 		fmt.Println("Elapsed Time for Encoding:", endEncoding)
 		encodingTime += endEncoding
 		fmt.Println("Size of RT Block:", len(ltBlks))
-		//ltBlks = append(ltBlks[:46], ltBlks[50:519]...)
+		ltBlks = append(ltBlks[:2], ltBlks[4:(symbols+redundancySymbols)-1]...)
 
 		message, err := json.Marshal(ltBlks)
 		if err != nil {
