@@ -184,9 +184,9 @@ func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, res strin
 }
 
 func (msg *Message) handleUDPConnection(serv *net.UDPConn) {
-	// RT decoding, 128 symbols
+	// RT decoding, 128 symbols with 4 symbol size
 	codec := fountain.NewRaptorCodec(128, 4)
-	dec := codec.NewDecoder(128)
+	dec := codec.NewDecoder(128 * 4)
 	var encSymbols []fountain.LTBlock
 
 	// envelope for block unmarshalling
