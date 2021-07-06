@@ -5,13 +5,14 @@ import (
 	"runtime"
 
 	udp "github.com/docbull/inlab-fabric-udp-proto"
+	hlfudp "github.com/docull/hyperledger-fabric-udp/inlab-udp/hlfudp"
 )
 
 func start() {
-	msg := Message{
+	msg := hlfudp.Message{
 		Block:           nil,
 		PeerContainerIP: "",
-		Fountain:        &RaptorCodec{RTSize: 0, RTData: make([]byte, 0)},
+		Fountain:        &hlfudp.RaptorCodec{RTSize: 0, RTData: make([]byte, 0)},
 		Key:             []byte{0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC},
 		IV:              []byte{0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC},
 	}
