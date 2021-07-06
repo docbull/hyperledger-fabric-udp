@@ -2,10 +2,7 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"crypto/cipher"
-	"crypto/des"
 	"encoding/json"
 	"fmt"
 	fountain "gofountain"
@@ -16,84 +13,29 @@ import (
 	"strings"
 	"time"
 
+	//"quic-go"
+	des "github.com/docbull/hyperledger-fabric-udp/inlab-udp/des"
 	udp "github.com/docbull/inlab-fabric-udp-proto"
 	protoG "github.com/golang/protobuf/proto"
 	proto "github.com/hyperledger/fabric-protos-go/gossip"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+	//quic "github.com/lucas-clemente/quic-go"
 )
 
 // Message means received block data
 type Message struct {
 	Block           *udp.Envelope
 	PeerContainerIP string
+	Fountain        *RaptorCodec
 	Key             []byte
 	IV              []byte
 }
 
-type AttrMsg struct {
-	Size int
-	Cnt  int
+type RaptorCodec struct {
+	RTSize int
+	RTData []byte
 }
-
-type UDPEnvelope struct {
-	Envelope []byte
-}
-
-var UDPenvelope UDPEnvelope
-var attr AttrMsg
-
-var Count int
-
-var timeSum time.Duration
-var desDecTime time.Duration
-
-// -------------------------- DES Cryptography -------------------------------
-
-func DesEncryption(key, iv, plainText []byte) ([]byte, error) {
-
-	block, err := des.NewCipher(key)
-
-	if err != nil {
-		return nil, err
-	}
-
-	blockSize := block.BlockSize()
-	origData := PKCS5Padding(plainText, blockSize)
-	blockMode := cipher.NewCBCEncrypter(block, iv)
-	cryted := make([]byte, len(origData))
-	blockMode.CryptBlocks(cryted, origData)
-	return cryted, nil
-}
-
-func DesDecryption(key, iv, cipherText []byte) ([]byte, error) {
-
-	block, err := des.NewCipher(key)
-
-	if err != nil {
-		return nil, err
-	}
-
-	blockMode := cipher.NewCBCDecrypter(block, iv)
-	origData := make([]byte, len(cipherText))
-	blockMode.CryptBlocks(origData, cipherText)
-	origData = PKCS5UnPadding(origData)
-	return origData, nil
-}
-
-func PKCS5Padding(src []byte, blockSize int) []byte {
-	padding := blockSize - len(src)%blockSize
-	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
-	return append(src, padtext...)
-}
-
-func PKCS5UnPadding(src []byte) []byte {
-	length := len(src)
-	unpadding := int(src[length-1])
-	return src[:(length - unpadding)]
-}
-
-// --------------------------------------------------------------------------
 
 func (msg *Message) WaitPeerConnection() {
 	conn, err := net.Listen("tcp", ":20000")
@@ -108,7 +50,6 @@ func (msg *Message) WaitPeerConnection() {
 		if err != nil {
 			fmt.Println(err)
 		}
-		defer sock.Close()
 
 		remoteAddr := sock.RemoteAddr().String()
 		peerIP := strings.Split(remoteAddr, ":")
@@ -152,20 +93,19 @@ func (msg *Message) SendBlock2Peer() {
 	resMsg := string(recvBuf)
 
 	fmt.Println("Received message from the Peer:", resMsg)
-
-	UDPenvelope.Envelope = UDPenvelope.Envelope[:0]
+	//UDPenvelope.Envelope = UDPenvelope.Envelope[:0]
 }
 
 func (msg *Message) UDPBlockHandler() {
 	protoEnvelope := &proto.Envelope{}
 
 	fmt.Println("--------- UDP Block Handler ---------")
-	fmt.Println("Block size with padding:", len(UDPenvelope.Envelope))
-	UDPenvelope.Envelope = UDPenvelope.Envelope[:attr.Size]
-	fmt.Println("Block size without padding:", len(UDPenvelope.Envelope))
+	fmt.Println("Block size with padding:", len(msg.Fountain.RTData))
+	msg.Fountain.RTData = msg.Fountain.RTData[:msg.Fountain.RTSize]
+	fmt.Println("Block size without padding:", len(msg.Fountain.RTData))
 	fmt.Println("-------------------------------------")
 
-	err := protoG.Unmarshal(UDPenvelope.Envelope, protoEnvelope)
+	err := protoG.Unmarshal(msg.Fountain.RTData, protoEnvelope)
 	if err != nil {
 		log.Println("Unmarshal error:", err)
 		return
@@ -205,23 +145,16 @@ func (msg *Message) handleUDPConnection(serv *net.UDPConn) {
 	log.Println("Received size of the Block data:", n)
 
 	if n < 30 {
-		Count = 0
-
 		// receiving block size
-		err := json.Unmarshal(buf, &attr)
+		err := json.Unmarshal(buf, &msg.Fountain)
 		if err != nil {
 			panic(err)
 		}
-
-		fmt.Println("Received Block Size:", attr.Size)
+		fmt.Println("Received Block Size:", msg.Fountain.RTSize)
 	} else {
-		startDES := time.Now()
-		desMsg, _ := DesDecryption(msg.Key, msg.IV, buf)
-		endDES := time.Since(startDES)
-		desDecTime += endDES
-		fmt.Println("DES Decryption delay:", endDES)
-
+		desMsg, _ := des.DesDecryption(msg.Key, msg.IV, buf)
 		fmt.Println("DES decoded data size:", len(desMsg))
+
 		// receiving encoding symbol slices
 		err = json.Unmarshal(desMsg, &encSymbols)
 		if err != nil {
@@ -229,35 +162,19 @@ func (msg *Message) handleUDPConnection(serv *net.UDPConn) {
 		}
 
 		// if success to docode, return the original symbols
-		startTime := time.Now()
 		errCheck := decoder(encSymbols, codec, dec)
-		elapsed := time.Since(startTime)
-		timeSum += elapsed
-		fmt.Println("Elased Time for Decodeing:", elapsed)
-
-		Count += int(elapsed)
-
 		if errCheck != nil {
 			fmt.Println("Complete recovery!")
-
-			attr.Cnt += len(errCheck)
-			fmt.Println("Count:", attr.Cnt)
 
 			res := "received"
 			go msg.SendResponse(serv, remoteaddr, res)
 
-			UDPenvelope.Envelope = append(UDPenvelope.Envelope, errCheck[:len(errCheck)]...)
-			fmt.Println("length of UDP Envelope:", len(UDPenvelope.Envelope))
-			if len(UDPenvelope.Envelope) >= attr.Size {
-				fmt.Println("RT Decoding time:", timeSum)
-				timeSum = 0
-				fmt.Println("DES Decoding time:", desDecTime)
-				desDecTime = 0
-
+			//UDPenvelope.Envelope = append(UDPenvelope.Envelope, errCheck[:len(errCheck)]...)
+			msg.Fountain.RTData = append(msg.Fountain.RTData, errCheck[:]...)
+			if len(msg.Fountain.RTData) >= msg.Fountain.RTSize {
 				fmt.Println("************")
 				fmt.Println("END OF BLOCK")
 				fmt.Println("************")
-
 				msg.UDPBlockHandler()
 			}
 		}
@@ -280,6 +197,7 @@ func (msg *Message) UDPServerListen() {
 		msg.handleUDPConnection(serv)
 	}
 }
+
 func (msg *Message) UDPBlockSender() {
 	conn, err := net.Dial("udp", "192.168.1.2:8000")
 	if err != nil {
@@ -303,8 +221,7 @@ func (msg *Message) UDPBlockSender() {
 	codec := fountain.NewRaptorCodec(symbols, symbolSize)
 
 	// sent block size first
-	attrMsg := AttrMsg{Size: len(envelope), Cnt: 0}
-	d, err := json.Marshal(attrMsg)
+	d, err := json.Marshal(&msg.Fountain)
 	if err != nil {
 		log.Println(err)
 	}
@@ -326,13 +243,8 @@ func (msg *Message) UDPBlockSender() {
 
 	sum := 0
 
-	var encodingTime time.Duration
-	var desTime time.Duration
-
 	// slices for sending RT symbols
 	var slice []byte
-
-	startTime := time.Now()
 	for i := 0; i < iter; i++ {
 		if (sum + (symbols * symbolSize)) > len(envelope) {
 			start = end
@@ -353,11 +265,7 @@ func (msg *Message) UDPBlockSender() {
 		fmt.Println("start:", start)
 		fmt.Println("end:", end)
 
-		startEncoding := time.Now()
 		ltBlks = fountain.EncodeLTBlocks(slice, index, codec)
-		endEncoding := time.Since(startEncoding)
-		fmt.Println("Elapsed Time for Encoding:", endEncoding)
-		encodingTime += endEncoding
 		fmt.Println("Size of RT Block:", len(ltBlks))
 		ltBlks = append(ltBlks[:2], ltBlks[4:(symbols+redundancySymbols)-1]...)
 
@@ -367,11 +275,7 @@ func (msg *Message) UDPBlockSender() {
 		}
 		fmt.Println("length of marshalled msg:", len(message))
 
-		startDES := time.Now()
-		desMsg, _ := DesEncryption(msg.Key, msg.IV, message)
-		endDES := time.Since(startDES)
-		desTime += endDES
-		fmt.Println("DES Decryption delay:", endDES)
+		desMsg, _ := des.DesEncryption(msg.Key, msg.IV, message)
 
 		fmt.Println("Message SEND", time.Now())
 		n, err := conn.Write(desMsg)
@@ -390,15 +294,9 @@ func (msg *Message) UDPBlockSender() {
 		fmt.Println()
 	}
 	fmt.Println()
-	elapsed := time.Since(startTime)
-	fmt.Println("RTUDP transmission latency:", elapsed)
-	fmt.Println("RT Encoding latency:", encodingTime)
-	fmt.Println("DES Encoding latency:", desTime)
-	fmt.Println("------------------------------------------")
 }
 
 func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope) (*udp.Status, error) {
-	fmt.Println("------------------------------------------")
 	log.Println("Receive Block data from the Peer container")
 
 	msg.Block.Payload = envelope.Payload
@@ -408,6 +306,10 @@ func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope)
 	go msg.UDPBlockSender()
 
 	return &udp.Status{Code: udp.StatusCode_Ok}, nil
+}
+
+func decoder(encSymbols []fountain.LTBlock, codec fountain.Codec, dec fountain.Decoder) []byte {
+	return dec.Decode()
 }
 
 // Peer2UDP waits Peer container connection
@@ -429,15 +331,125 @@ func (msg *Message) Peer2UDP() {
 	}
 }
 
-func decoder(encSymbols []fountain.LTBlock, codec fountain.Codec, dec fountain.Decoder) []byte {
-	fmt.Println(dec.AddBlocks(encSymbols))
-	return dec.Decode()
+/*
+const addr = "192.168.1.10:4242"
+
+var quicStream quic.Stream
+
+// QUIC
+type BlockQUIC struct {
+	receiver   string
+	quicStream quic.Stream
 }
+
+func (msg *Message) StartQUIC() {
+	func() { log.Fatal(msg.QuicServer()) }()
+}
+
+// A wrapper for io.Writer for storing the block data
+// and response a message to the QUIC sender.
+type loggingWriter struct {
+	Writer io.Writer
+	// quicBlock stores a Block for sending to another
+	// peer using QUIC protocol.
+	quicBlock *udp.Envelope
+}
+
+// QuicServer receives block data and store it into own block message.
+func (msg *Message) QuicServer() error {
+	listener, err := quic.ListenAddr(addr, generateTLSConfig(), nil)
+	if err != nil {
+		return err
+	}
+	sess, err := listener.Accept(context.Background())
+	if err != nil {
+		return err
+	}
+	quicStream, err = sess.AcceptStream(context.Background())
+	if err != nil {
+		panic(err)
+	}
+
+	w := loggingWriter{Writer: quicStream}
+	if _, err = io.Copy(w, quicStream); err != nil {
+		log.Fatal(err)
+	}
+	return nil
+}
+
+func (w loggingWriter) Write(b []byte) (int, error) {
+	// Store the received block into own QUIC Block message.
+	w.quicBlock.Payload = append(w.quicBlock.Payload, b[:len(b)]...)
+	return w.Writer.Write(b)
+}
+
+// Setup a bare-bones TLS config for the server
+func generateTLSConfig() *tls.Config {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		panic(err)
+	}
+	template := x509.Certificate{SerialNumber: big.NewInt(1)}
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+
+	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		panic(err)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+		NextProtos:   []string{"quic-echo-example"},
+	}
+}
+
+func (msg *Message) QuicClient() error {
+	// tlsConf references TLS information
+	tlsConf := msg.QuicTLS()
+	session, err := quic.DialAddr(addr, tlsConf, nil)
+	if err != nil {
+		return err
+	}
+	stream, err := session.OpenStreamSync(context.Background())
+	if err != nil {
+		return err
+	}
+
+	// Send the block data using QUIC protocol.
+	_, err = stream.Write([]byte(msg.Block.Payload))
+	if err != nil {
+		return err
+	}
+
+	// Receive a response message from the receiver.
+	buf := make([]byte, len(msg.Block.Payload))
+	_, err = io.ReadFull(stream, buf)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (msg *Message) QuicTLS() *tls.Config {
+	tlsConf := &tls.Config{
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"QUIC-HLF"},
+	}
+
+	return tlsConf
+}
+*/
 
 func start() {
 	msg := Message{
 		Block:           nil,
 		PeerContainerIP: "",
+		Fountain:        &RaptorCodec{RTSize: 0, RTData: make([]byte, 0)},
 		Key:             []byte{0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC},
 		IV:              []byte{0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC},
 	}
@@ -447,22 +459,18 @@ func start() {
 		SecretEnvelope: nil,
 	}
 
-	UDPenvelope.Envelope = make([]byte, 0)
-
 	// waiting Peer containers' connection
 	go msg.Peer2UDP()
 	go msg.UDPServerListen()
+	//go msg.StartQUIC()
 
 	// waiting D2D containers' connection
-	go msg.WaitPeerConnection()
-	for {
-
-	}
+	msg.WaitPeerConnection()
 }
 
 func main() {
 	runtime.GOMAXPROCS((runtime.NumCPU()))
-	fmt.Println("CPU:", runtime.GOMAXPROCS(0))
+	fmt.Println("Running CPU cores:", runtime.GOMAXPROCS(0))
 
 	start()
 }
