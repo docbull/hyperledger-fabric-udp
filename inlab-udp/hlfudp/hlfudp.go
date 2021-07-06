@@ -1,4 +1,4 @@
-package main
+package hlfudp
 
 import (
 	"bufio"
@@ -9,7 +9,6 @@ import (
 	"log"
 	"math"
 	"net"
-	"runtime"
 	"strings"
 	"time"
 
@@ -37,6 +36,8 @@ type RaptorCodec struct {
 	RTData []byte
 }
 
+// WaitPeerConnection receives Peer Endpoint
+// from the peer container, and then saves it.
 func (msg *Message) WaitPeerConnection() {
 	conn, err := net.Listen("tcp", ":20000")
 	if err != nil {
@@ -262,8 +263,6 @@ func (msg *Message) UDPBlockSender() {
 			sum += (symbols * symbolSize)
 			slice = envelope[start:end]
 		}
-		fmt.Println("start:", start)
-		fmt.Println("end:", end)
 
 		ltBlks = fountain.EncodeLTBlocks(slice, index, codec)
 		fmt.Println("Size of RT Block:", len(ltBlks))
@@ -296,23 +295,13 @@ func (msg *Message) UDPBlockSender() {
 	fmt.Println()
 }
 
-func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope) (*udp.Status, error) {
-	log.Println("Receive Block data from the Peer container")
-
-	msg.Block.Payload = envelope.Payload
-	msg.Block.Signature = envelope.Signature
-	msg.Block.SecretEnvelope = envelope.SecretEnvelope
-
-	go msg.UDPBlockSender()
-
-	return &udp.Status{Code: udp.StatusCode_Ok}, nil
-}
-
+// raptor fountain decoding function
 func decoder(encSymbols []fountain.LTBlock, codec fountain.Codec, dec fountain.Decoder) []byte {
 	return dec.Decode()
 }
 
-// Peer2UDP waits Peer container connection
+// Peer2UDP listens connections from the peer container for
+// forwarding block data. This function is working based on gRPC.
 func (msg *Message) Peer2UDP() {
 	lis, err := net.Listen("tcp", ":11800")
 	if err != nil {
@@ -329,6 +318,22 @@ func (msg *Message) Peer2UDP() {
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// BlockDataForUDP forwards the block data over UDP protocols.
+// It stores the block that received through gRPC call, then
+// forward the block data to UDP transmission functions.
+func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope) (*udp.Status, error) {
+	log.Println("Receive Block data from the Peer container")
+
+	msg.Block.Payload = envelope.Payload
+	msg.Block.Signature = envelope.Signature
+	msg.Block.SecretEnvelope = envelope.SecretEnvelope
+
+	// send the block through ...
+	go msg.UDPBlockSender()
+
+	return &udp.Status{Code: udp.StatusCode_Ok}, nil
 }
 
 /*
@@ -444,33 +449,3 @@ func (msg *Message) QuicTLS() *tls.Config {
 	return tlsConf
 }
 */
-
-func start() {
-	msg := Message{
-		Block:           nil,
-		PeerContainerIP: "",
-		Fountain:        &RaptorCodec{RTSize: 0, RTData: make([]byte, 0)},
-		Key:             []byte{0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC},
-		IV:              []byte{0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC},
-	}
-	msg.Block = &udp.Envelope{
-		Payload:        nil,
-		Signature:      nil,
-		SecretEnvelope: nil,
-	}
-
-	// waiting Peer containers' connection
-	go msg.Peer2UDP()
-	go msg.UDPServerListen()
-	//go msg.StartQUIC()
-
-	// waiting D2D containers' connection
-	msg.WaitPeerConnection()
-}
-
-func main() {
-	runtime.GOMAXPROCS((runtime.NumCPU()))
-	fmt.Println("Running CPU cores:", runtime.GOMAXPROCS(0))
-
-	start()
-}
