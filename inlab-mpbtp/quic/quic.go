@@ -12,10 +12,9 @@ import (
 	"math/big"
 	"quic-go"
 
+	udp "github.com/docbull/inlab-fabric-udp-proto"
 	proto "github.com/hyperledger/fabric-protos-go/gossip"
 )
-
-const addr = "192.168.1.7:4242"
 
 var quicStream quic.Stream
 
@@ -38,10 +37,10 @@ type loggingWriter struct {
 	quicBlock *proto.Envelope
 }
 
-func QuicBlockSender(block *proto.Envelope) error {
+func QuicBlockSender(block *udp.Envelope) error {
 	// tlsConf references TLS information
 	tlsConf := QuicTLS()
-	session, err := quic.DialAddr(addr, tlsConf, nil)
+	session, err := quic.DialAddr("192.168.1.7:4242", tlsConf, nil)
 	if err != nil {
 		return err
 	}
@@ -65,7 +64,7 @@ func QuicBlockSender(block *proto.Envelope) error {
 
 // QuicServer receives block data and store it into own block message.
 func QuicServer() error {
-	listener, err := quic.ListenAddr(addr, generateTLSConfig(), nil)
+	listener, err := quic.ListenAddr("localhost:4242", generateTLSConfig(), nil)
 	if err != nil {
 		return err
 	}

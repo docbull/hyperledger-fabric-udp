@@ -12,6 +12,7 @@ import (
 	"time"
 
 	des "github.com/docbull/hyperledger-fabric-udp/inlab-udp/des"
+	"github.com/docbull/hyperledger-fabric-udp/inlab-udp/quic"
 	udp "github.com/docbull/inlab-fabric-udp-proto"
 	rtfountain "github.com/docbull/inlab-fabric-udp/inlab-udp/raptor"
 	protoG "github.com/golang/protobuf/proto"
@@ -191,7 +192,7 @@ func (msg *Message) UDPServerListen() {
 }
 
 func (msg *Message) UDPBlockSender() {
-	conn, err := net.Dial("udp", "192.168.1.2:8000")
+	conn, err := net.Dial("udp", "192.168.1.7:8000")
 	if err != nil {
 		fmt.Printf("Some error %v", err)
 		return
@@ -316,7 +317,7 @@ func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope)
 	msg.Block.Signature = envelope.Signature
 	msg.Block.SecretEnvelope = envelope.SecretEnvelope
 
-	go msg.UDPBlockSender()
+	go quic.QuicBlockSender(udp.Envelope)
 
 	return &udp.Status{Code: udp.StatusCode_Ok}, nil
 }
