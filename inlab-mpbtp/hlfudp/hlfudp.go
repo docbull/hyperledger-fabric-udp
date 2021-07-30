@@ -3,16 +3,23 @@ package hlfudp
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"io"
 	"log"
 	"math"
+	"math/big"
 	"net"
 	"strings"
 	"time"
 
 	des "github.com/docbull/hyperledger-fabric-udp/inlab-udp/des"
-	"github.com/docbull/hyperledger-fabric-udp/inlab-udp/quic"
+	quic "github.com/docbull/hyperledger-fabric-udp/inlab-udp/quicblock"
 	udp "github.com/docbull/inlab-fabric-udp-proto"
 	rtfountain "github.com/docbull/inlab-fabric-udp/inlab-udp/raptor"
 	protoG "github.com/golang/protobuf/proto"
@@ -287,6 +294,108 @@ func (msg *Message) UDPBlockSender() {
 	fmt.Println()
 }
 
+var quicStream quic.Stream
+
+// QUIC
+type BlockQUIC struct {
+	receiver   string
+	quicStream quic.Stream
+}
+
+func (msg *Message) StartQUIC() {
+	func() { log.Fatal(msg.QuicServer()) }()
+}
+
+// A wrapper for io.Writer for storing the block data
+// and response a message to the QUIC sender.
+type loggingWriter struct {
+	Writer io.Writer
+	// quicBlock stores a Block for sending to another
+	// peer using QUIC protocol.
+	quicBlock *udp.Envelope
+}
+
+// QuicServer receives block data and store it into own block message.
+func (msg *Message) QuicServer() error {
+	listener, err := quic.ListenAddr("192.168.1.7:4242", generateTLSConfig(), nil)
+	if err != nil {
+		return err
+	}
+	sess, err := listener.Accept(context.Background())
+	if err != nil {
+		return err
+	}
+	quicStream, err = sess.AcceptStream(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	w := loggingWriter{Writer: quicStream}
+	if _, err = io.Copy(w, quicStream); err != nil {
+		log.Fatal(err)
+	}
+	return nil
+}
+func (w loggingWriter) Write(b []byte) (int, error) {
+	// Store the received block into own QUIC Block message.
+	w.quicBlock.Payload = append(w.quicBlock.Payload, b[:len(b)]...)
+	fmt.Println(w.quicBlock.Payload)
+	return w.Writer.Write(b)
+}
+
+// Setup a bare-bones TLS config for the server
+func generateTLSConfig() *tls.Config {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		panic(err)
+	}
+	template := x509.Certificate{SerialNumber: big.NewInt(1)}
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		panic(err)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+		NextProtos:   []string{"quic-echo-example"},
+	}
+}
+func (msg *Message) QuicBlockSender() error {
+	// tlsConf references TLS information
+	tlsConf := msg.QuicTLS()
+	session, err := quic.DialAddr(":4242", tlsConf, nil)
+	if err != nil {
+		return err
+	}
+	stream, err := session.OpenStreamSync(context.Background())
+	if err != nil {
+		return err
+	}
+	// Send the block data using QUIC protocol.
+	_, err = stream.Write([]byte(msg.Block.Payload))
+	if err != nil {
+		return err
+	}
+	// Receive a response message from the receiver.
+	buf := make([]byte, len(msg.Block.Payload))
+	_, err = io.ReadFull(stream, buf)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+func (msg *Message) QuicTLS() *tls.Config {
+	tlsConf := &tls.Config{
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"QUIC-HLF"},
+	}
+	return tlsConf
+}
+
 // Peer2UDP listens connections from the peer container for
 // forwarding block data. This function is working based on gRPC.
 func (msg *Message) Peer2UDP() {
@@ -317,7 +426,8 @@ func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope)
 	msg.Block.Signature = envelope.Signature
 	msg.Block.SecretEnvelope = envelope.SecretEnvelope
 
-	go quic.QuicBlockSender(udp.Envelope)
+	fmt.Println(msg.Block.Payload)
+	go msg.QuicBlockSender()
 
 	return &udp.Status{Code: udp.StatusCode_Ok}, nil
 }
