@@ -5,6 +5,7 @@ import (
 	"runtime"
 
 	hlfudp "github.com/docbull/hyperledger-fabric-udp/inlab-udp/hlfudp"
+	"github.com/docbull/hyperledger-fabric-udp/inlab-udp/quic"
 	udp "github.com/docbull/inlab-fabric-udp-proto"
 )
 
@@ -25,7 +26,7 @@ func start() {
 	// waiting Peer containers' connection
 	go msg.Peer2UDP()
 	go msg.UDPServerListen()
-	//go msg.StartQUIC()
+	go quic.StartQUIC()
 
 	// waiting D2D containers' connection
 	msg.WaitPeerConnection()
