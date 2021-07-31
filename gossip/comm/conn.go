@@ -14,10 +14,9 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/docbull/inlab-fabric-modules/inlab-sdn/protos/overlay"
-	protoG "github.com/golang/protobuf/proto"
+	udp "github.com/docbull/inlab-fabric-udp-proto"
 	proto "github.com/hyperledger/fabric-protos-go/gossip"
 	"github.com/hyperledger/fabric/gossip/common"
 	"github.com/hyperledger/fabric/gossip/metrics"
@@ -25,6 +24,7 @@ import (
 	"github.com/hyperledger/fabric/gossip/util"
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/reflection"
 )
 
 type handler func(message *protoext.SignedGossipMessage)
@@ -307,7 +307,6 @@ func (conn *connection) send(msg *protoext.SignedGossipMessage, onErr func(error
 	}
 }
 
-// D2DBlockReceiver receives block data from D2D container (i.g., SDN Client)
 func (conn *connection) UDPBlockReceiver() {
 	lis, err := net.Listen("tcp", ":16220")
 	if err != nil {
@@ -318,18 +317,40 @@ func (conn *connection) UDPBlockReceiver() {
 
 	fmt.Println("Ready to receive data msg over UDP")
 
-	for {
-		sock, err := lis.Accept()
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		defer sock.Close()
-
-		go conn.HandleUDPBlock(sock)
+	grpcServer := grpc.NewServer()
+	udp.RegisterUDPServiceServer(grpcServer, conn)
+	reflection.Register(grpcServer)
+	if err = grpcServer.Serve(lis); err != nil {
+		log.Fatal(err)
 	}
 }
 
+func (conn *connection) BlockDataForUDP(ctx context.Context, mpbtpEnvelope *udp.Envelope) (*udp.Status, error) {
+	log.Println("Receive Block data from the MPBTP container")
+
+	envelope := &proto.Envelope{
+		Payload:   mpbtpEnvelope.Payload,
+		Signature: mpbtpEnvelope.Signature,
+	}
+
+	conn.metrics.ReceivedMessages.Add(1)
+	msg, err := protoext.EnvelopeToGossipMessage(envelope)
+	if err != nil {
+		*conn.errChan <- err
+		conn.logger.Warningf("Got error, aborting: %v", err)
+		return &udp.Status{Code: udp.StatusCode_Failed}, err
+	}
+	select {
+	case *conn.msgChan <- msg:
+	case <-conn.stopChan:
+		conn.logger.Debug("Closing reading from stream")
+		return &udp.Status{Code: udp.StatusCode_Failed}, err
+	}
+
+	return &udp.Status{Code: udp.StatusCode_Ok}, nil
+}
+
+/* socket
 func (conn *connection) HandleUDPBlock(sock net.Conn) {
 	envelope := make([]byte, 1024*1024)
 	length, err := sock.Read(envelope)
@@ -366,6 +387,7 @@ func (conn *connection) HandleUDPBlock(sock net.Conn) {
 		return
 	}
 }
+*/
 
 func (conn *connection) serviceConnection() error {
 	errChan := make(chan error, 1)
