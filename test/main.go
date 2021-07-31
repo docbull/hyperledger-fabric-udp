@@ -83,7 +83,7 @@ func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, length st
 
 func (msg *Message) SendBlock2Peer() {
 	peerIP := msg.PeerContainerIP + ":16220"
-	conn, err := grpc.Dial(peerIP)
+	conn, err := grpc.Dial(peerIP, grpc.WithInsecure())
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -134,14 +134,13 @@ func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope)
 	msg.Block.Signature = envelope.Signature
 	msg.Block.SecretEnvelope = envelope.SecretEnvelope
 
-	fmt.Println(msg.Block.Payload)
 	go msg.UDPBlockSender()
 
 	return &udp.Status{Code: udp.StatusCode_Ok}, nil
 }
 
 func (msg *Message) UDPBlockSender() {
-	conn, err := net.Dial("udp", "192.168.1.7:8000")
+	conn, err := net.Dial("udp", "203.247.240.234:8000")
 	if err != nil {
 		fmt.Printf("Some error %v", err)
 		return
