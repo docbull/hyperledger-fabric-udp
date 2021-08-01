@@ -96,34 +96,7 @@ func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope)
 	return &udp.Status{Code: udp.StatusCode_Ok}, nil
 }
 
-// ------------------------Peer to MPBTP (TCP)----------------------------
-
-// WaitPeerConnection receives Peer Endpoint
-// from the peer container, and then saves it
-// for communicating to docker virtual IP.
-func (msg *Message) WaitPeerConnection() {
-	conn, err := net.Listen("tcp", ":20000")
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer conn.Close()
-
-	for {
-		sock, err := conn.Accept()
-		if err != nil {
-			fmt.Println(err)
-		}
-
-		remoteAddr := sock.RemoteAddr().String()
-		peerIP := strings.Split(remoteAddr, ":")
-		msg.PeerContainerIP = peerIP[0]
-
-		fmt.Println(msg.PeerContainerIP)
-	}
-}
-
-// -------------------------MPBTP to MPBTP (UDP)--------------------------
+// -------------------------MPBTP to MPBTP (QUIC)--------------------------
 
 func (msg *Message) UDPServerListen() {
 	listener, err := quic.ListenAddr(":8000", generateTLSConfig(), nil)
@@ -138,22 +111,6 @@ func (msg *Message) UDPServerListen() {
 			go msg.handleUDPConnection(sess)
 		}
 	}
-	/*
-		addr := net.UDPAddr{
-			IP:   net.ParseIP("0.0.0.0"),
-			Port: 8000,
-		}
-		serv, err := net.ListenUDP("udp", &addr)
-		if err != nil {
-			fmt.Printf("Some error %v\n", err)
-			return
-		}
-		defer serv.Close()
-
-		for {
-			msg.handleUDPConnection(serv)
-		}
-	*/
 }
 
 func (msg *Message) handleUDPConnection(sess quic.Session) {
@@ -162,48 +119,14 @@ func (msg *Message) handleUDPConnection(sess quic.Session) {
 		panic(err)
 	} else {
 		for {
+			msg.writer = &loggingWriter{stream}
 			_, err = io.Copy(msg, stream)
 			if err != nil {
 				fmt.Println(err)
 			}
 		}
 	}
-
-	/*
-		// buf for receiving RT symbols of block
-		buf := make([]byte, 4096*10)
-
-		n, remoteaddr, err := serv.ReadFromUDP(buf)
-		fmt.Println("Block Received:", time.Now())
-		if err != nil {
-			fmt.Printf("Some error %v", err)
-			return
-		}
-		buf = buf[0:n]
-
-		log.Println("Received a Block from", remoteaddr)
-		log.Println("Received size of the Block data:", n)
-
-		msg.UDPBlockHandler(serv, remoteaddr, n, buf)
-	*/
 }
-
-/*
-func (msg *Message) UDPBlockHandler(serv *net.UDPConn, remoteaddr *net.UDPAddr, n int, buf []byte) {
-	envelope := &proto.Envelope{}
-	err := protoG.Unmarshal(buf, envelope)
-	if err != nil {
-		log.Println("Unmarshal error:", err)
-		return
-	}
-	msg.Block.Payload = envelope.Payload
-	msg.Block.Signature = envelope.Signature
-
-	length := string(n)
-	go msg.SendResponse(serv, remoteaddr, length)
-	go msg.SendBlock2Peer()
-}
-*/
 
 func (msg *Message) Write(buf []byte) (int, error) {
 	envelope := &proto.Envelope{}
@@ -288,33 +211,40 @@ func (msg *Message) UDPBlockSender() {
 		return
 	}
 	fmt.Println(len(buf))
+}
 
-	/*
-		conn, err := net.Dial("udp", "203.247.240.234:8000")
-		if err != nil {
-			fmt.Printf("Some error %v", err)
-			return
-		}
-		defer conn.Close()
+// ------------------------Peer to MPBTP (TCP)----------------------------
 
-		marshalledEnvelope, err := protoG.Marshal(msg.Block)
+// WaitPeerConnection receives Peer Endpoint
+// from the peer container, and then saves it
+// for communicating to docker virtual IP.
+func (msg *Message) WaitPeerConnection() {
+	conn, err := net.Listen("tcp", ":20000")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer conn.Close()
+
+	for {
+		sock, err := conn.Accept()
 		if err != nil {
 			fmt.Println(err)
-			return
 		}
-		fmt.Println("Marshalled data size:", len(marshalledEnvelope))
 
-		_, err = conn.Write(marshalledEnvelope)
-		if err != nil {
-			log.Println(err)
-		}
-	*/
+		remoteAddr := sock.RemoteAddr().String()
+		peerIP := strings.Split(remoteAddr, ":")
+		msg.PeerContainerIP = peerIP[0]
+
+		fmt.Println(msg.PeerContainerIP)
+	}
 }
 
 func start() {
 	msg := &Message{
 		Block:           nil,
 		PeerContainerIP: "",
+		writer:          &loggingWriter{},
 	}
 	msg.Block = &udp.Envelope{
 		Payload:        nil,
