@@ -2,85 +2,41 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"io"
 	"log"
+	"math/big"
 	"net"
 	"runtime"
 	"strings"
-	"time"
 
-	udp "github.com/docbull/inlab-fabric-udp-proto"
 	protoG "github.com/golang/protobuf/proto"
 	proto "github.com/hyperledger/fabric-protos-go/gossip"
+	quic "github.com/lucas-clemente/quic-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
+
+	udp "github.com/docbull/inlab-fabric-udp-proto"
 )
+
+type loggingWriter struct{ io.Writer }
 
 // Message means received block data
 type Message struct {
 	Block           *udp.Envelope
 	PeerContainerIP string
-	Key             []byte
-	IV              []byte
+	writer          *loggingWriter
 }
 
-func (msg *Message) UDPServerListen() {
-	addr := net.UDPAddr{
-		IP:   net.ParseIP("0.0.0.0"),
-		Port: 8000,
-	}
-	serv, err := net.ListenUDP("udp", &addr)
-	if err != nil {
-		fmt.Printf("Some error %v\n", err)
-		return
-	}
-	defer serv.Close()
+// --------------------------Peer to MPBTP (gRPC)------------------------
 
-	for {
-		msg.handleUDPConnection(serv)
-	}
-}
-
-func (msg *Message) handleUDPConnection(serv *net.UDPConn) {
-	// buf for receiving RT symbols of block
-	buf := make([]byte, 4096*10)
-
-	n, remoteaddr, err := serv.ReadFromUDP(buf)
-	fmt.Println("Block Received:", time.Now())
-	if err != nil {
-		fmt.Printf("Some error %v", err)
-		return
-	}
-	buf = buf[0:n]
-
-	log.Println("Received a Block from", remoteaddr)
-	log.Println("Received size of the Block data:", n)
-
-	msg.UDPBlockHandler(serv, remoteaddr, n, buf)
-}
-
-func (msg *Message) UDPBlockHandler(serv *net.UDPConn, remoteaddr *net.UDPAddr, n int, buf []byte) {
-	envelope := &proto.Envelope{}
-	err := protoG.Unmarshal(buf, envelope)
-	if err != nil {
-		log.Println("Unmarshal error:", err)
-		return
-	}
-	msg.Block.Payload = envelope.Payload
-	msg.Block.Signature = envelope.Signature
-
-	length := string(n)
-	go msg.SendResponse(serv, remoteaddr, length)
-	go msg.SendBlock2Peer()
-}
-
-func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, length string) {
-	_, err := conn.WriteToUDP([]byte(length), addr)
-	if err != nil {
-		fmt.Printf("Couldn't send response %v", err)
-	}
-}
-
+// SendBlock2Peer forwards the received block that from another
+// MPBTP container to connected Peer container.
 func (msg *Message) SendBlock2Peer() {
 	peerIP := msg.PeerContainerIP + ":16220"
 	conn, err := grpc.Dial(peerIP, grpc.WithInsecure())
@@ -104,8 +60,9 @@ func (msg *Message) SendBlock2Peer() {
 	}
 }
 
-// Peer2UDP listens connections from the peer container for
-// forwarding block data. This function is working based on gRPC.
+// Peer2UDP waits connections from the peer container for
+// forwarding block data to other MPBTP containers over UDP.
+// This function is working based on gRPC.
 func (msg *Message) Peer2UDP() {
 	lis, err := net.Listen("tcp", ":11800")
 	if err != nil {
@@ -139,29 +96,11 @@ func (msg *Message) BlockDataForUDP(ctx context.Context, envelope *udp.Envelope)
 	return &udp.Status{Code: udp.StatusCode_Ok}, nil
 }
 
-func (msg *Message) UDPBlockSender() {
-	conn, err := net.Dial("udp", "203.247.240.234:8000")
-	if err != nil {
-		fmt.Printf("Some error %v", err)
-		return
-	}
-	defer conn.Close()
-
-	marshalledEnvelope, err := protoG.Marshal(msg.Block)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Println("Marshalled data size:", len(marshalledEnvelope))
-
-	_, err = conn.Write(marshalledEnvelope)
-	if err != nil {
-		log.Println(err)
-	}
-}
+// ------------------------Peer to MPBTP (TCP)----------------------------
 
 // WaitPeerConnection receives Peer Endpoint
-// from the peer container, and then saves it.
+// from the peer container, and then saves it
+// for communicating to docker virtual IP.
 func (msg *Message) WaitPeerConnection() {
 	conn, err := net.Listen("tcp", ":20000")
 	if err != nil {
@@ -184,12 +123,198 @@ func (msg *Message) WaitPeerConnection() {
 	}
 }
 
+// -------------------------MPBTP to MPBTP (UDP)--------------------------
+
+func (msg *Message) UDPServerListen() {
+	listener, err := quic.ListenAddr(":8000", generateTLSConfig(), nil)
+	if err != nil {
+		fmt.Println(err)
+	}
+	for {
+		sess, err := listener.Accept(context.Background())
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			go msg.handleUDPConnection(sess)
+		}
+	}
+	/*
+		addr := net.UDPAddr{
+			IP:   net.ParseIP("0.0.0.0"),
+			Port: 8000,
+		}
+		serv, err := net.ListenUDP("udp", &addr)
+		if err != nil {
+			fmt.Printf("Some error %v\n", err)
+			return
+		}
+		defer serv.Close()
+
+		for {
+			msg.handleUDPConnection(serv)
+		}
+	*/
+}
+
+func (msg *Message) handleUDPConnection(sess quic.Session) {
+	stream, err := sess.AcceptStream(context.Background())
+	if err != nil {
+		panic(err)
+	} else {
+		for {
+			_, err = io.Copy(msg, stream)
+			if err != nil {
+				fmt.Println(err)
+			}
+		}
+	}
+
+	/*
+		// buf for receiving RT symbols of block
+		buf := make([]byte, 4096*10)
+
+		n, remoteaddr, err := serv.ReadFromUDP(buf)
+		fmt.Println("Block Received:", time.Now())
+		if err != nil {
+			fmt.Printf("Some error %v", err)
+			return
+		}
+		buf = buf[0:n]
+
+		log.Println("Received a Block from", remoteaddr)
+		log.Println("Received size of the Block data:", n)
+
+		msg.UDPBlockHandler(serv, remoteaddr, n, buf)
+	*/
+}
+
+/*
+func (msg *Message) UDPBlockHandler(serv *net.UDPConn, remoteaddr *net.UDPAddr, n int, buf []byte) {
+	envelope := &proto.Envelope{}
+	err := protoG.Unmarshal(buf, envelope)
+	if err != nil {
+		log.Println("Unmarshal error:", err)
+		return
+	}
+	msg.Block.Payload = envelope.Payload
+	msg.Block.Signature = envelope.Signature
+
+	length := string(n)
+	go msg.SendResponse(serv, remoteaddr, length)
+	go msg.SendBlock2Peer()
+}
+*/
+
+func (msg *Message) Write(buf []byte) (int, error) {
+	envelope := &proto.Envelope{}
+	err := protoG.Unmarshal(buf, envelope)
+	if err != nil {
+		log.Println("Unmarshal error:", err)
+		return 0, nil
+	}
+	msg.Block.Payload = envelope.Payload
+	msg.Block.Signature = envelope.Signature
+
+	go msg.SendBlock2Peer()
+
+	return msg.writer.Writer.Write(buf)
+}
+
+// Setup a bare-bones TLS config for the server
+func generateTLSConfig() *tls.Config {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		panic(err)
+	}
+	template := x509.Certificate{SerialNumber: big.NewInt(1)}
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+
+	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		panic(err)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+		NextProtos:   []string{"quic-echo-example"},
+	}
+}
+
+func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, length string) {
+	_, err := conn.WriteToUDP([]byte(length), addr)
+	if err != nil {
+		fmt.Printf("Couldn't send response %v", err)
+	}
+}
+
+func (msg *Message) UDPBlockSender() {
+	tlsConf := &tls.Config{
+		InsecureSkipVerify: true,
+		NextProtos:         []string{"quic-echo-example"},
+	}
+	session, err := quic.DialAddr("203.247.240.234:8000", tlsConf, nil)
+	if err != nil {
+		fmt.Println(err)
+	}
+	log.Println("Received Block data from the Peer container")
+
+	stream, err := session.OpenStreamSync(context.Background())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	marshalledEnvelope, err := protoG.Marshal(msg.Block)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("Marshalled data size:", len(marshalledEnvelope))
+
+	_, err = stream.Write([]byte(marshalledEnvelope))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	buf := make([]byte, len(marshalledEnvelope))
+	_, err = io.ReadFull(stream, buf)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(len(buf))
+
+	/*
+		conn, err := net.Dial("udp", "203.247.240.234:8000")
+		if err != nil {
+			fmt.Printf("Some error %v", err)
+			return
+		}
+		defer conn.Close()
+
+		marshalledEnvelope, err := protoG.Marshal(msg.Block)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		fmt.Println("Marshalled data size:", len(marshalledEnvelope))
+
+		_, err = conn.Write(marshalledEnvelope)
+		if err != nil {
+			log.Println(err)
+		}
+	*/
+}
+
 func start() {
 	msg := &Message{
 		Block:           nil,
 		PeerContainerIP: "",
-		Key:             []byte{0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC},
-		IV:              []byte{0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC, 0xBC},
 	}
 	msg.Block = &udp.Envelope{
 		Payload:        nil,
