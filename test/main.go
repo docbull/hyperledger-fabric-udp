@@ -56,7 +56,7 @@ func (msg *Message) SendBlock2Peer() {
 		log.Println("Not OK for MPBTP block transmission:", res.Code)
 		return
 	} else {
-		log.Println("REceived message from MPBTP:", res)
+		log.Println("Received message from Peer:", res)
 	}
 }
 
