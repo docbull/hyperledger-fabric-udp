@@ -12,6 +12,7 @@ import (
 	"log"
 	"math/big"
 	"net"
+	"os"
 	"runtime"
 	"strings"
 
@@ -175,15 +176,17 @@ func (msg *Message) SendResponse(conn *net.UDPConn, addr *net.UDPAddr, length st
 }
 
 func (msg *Message) UDPBlockSender() {
+	hostIP := os.Getenv("PEER1_IP_ADDRESS")
+	fmt.Println("Send a new Block to", hostIP)
+
 	tlsConf := &tls.Config{
 		InsecureSkipVerify: true,
 		NextProtos:         []string{"quic-echo-example"},
 	}
-	session, err := quic.DialAddr("203.247.240.234:8000", tlsConf, nil)
+	session, err := quic.DialAddr(hostIP+":8000", tlsConf, nil)
 	if err != nil {
 		fmt.Println(err)
 	}
-	log.Println("Received Block data from the Peer container")
 
 	stream, err := session.OpenStreamSync(context.Background())
 	if err != nil {
@@ -210,7 +213,7 @@ func (msg *Message) UDPBlockSender() {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println(len(buf))
+	fmt.Println("Sent block size:", len(buf))
 }
 
 // ------------------------Peer to MPBTP (TCP)----------------------------
