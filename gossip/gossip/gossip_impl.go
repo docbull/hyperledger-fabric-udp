@@ -338,7 +338,7 @@ func (g *Node) start() {
 	log.Println("IP address:", os.Getenv("IP_ADDRESS"))
 	hostIP := os.Getenv("IP_ADDRESS")
 
-	go g.sendEndpoint(hostIP)
+	//go g.sendEndpoint(hostIP)
 	go g.sendRemoteAddr(hostIP)
 
 	msgSelector := func(msg interface{}) bool {

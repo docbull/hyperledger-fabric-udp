@@ -11,11 +11,8 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
-	"strings"
 	"sync"
 
-	"github.com/docbull/inlab-fabric-modules/inlab-sdn/protos/overlay"
 	udp "github.com/docbull/inlab-fabric-udp-proto"
 	proto "github.com/hyperledger/fabric-protos-go/gossip"
 	"github.com/hyperledger/fabric/gossip/common"
@@ -142,33 +139,6 @@ func (cs *connectionStore) getConnection(peer *RemotePeer) (*connection, error) 
 	cs.pki2Conn[string(createdConnection.pkiID)] = conn
 
 	conn.peerEndpoint = peer.Endpoint
-
-	if conn.peerEndpoint != "" {
-		hostIP := os.Getenv("IP_ADDRESS")
-		grpcConn, err := grpc.Dial(hostIP+":8080", grpc.WithInsecure())
-		if err != nil {
-			fmt.Println(err)
-			return conn, nil
-		}
-		defer grpcConn.Close()
-
-		peerClient := overlay.NewOverlayStructureServiceClient(grpcConn)
-
-		endpoint := overlay.PeerEndpoint{Endpoint: conn.peerEndpoint}
-		peerOverlayStructure, err := peerClient.SeeOverlayStructure(context.Background(), &endpoint)
-		if err != nil {
-			fmt.Println(err)
-			return conn, nil
-		}
-
-		if strings.Contains(peerOverlayStructure.SuperPeer, conn.peerEndpoint) {
-			fmt.Println()
-			fmt.Println("My Super Peer:", peerOverlayStructure.SuperPeer)
-			fmt.Println("Connected Peer:", conn.peerEndpoint)
-			fmt.Println()
-			conn.isD2D = true
-		}
-	}
 
 	go conn.serviceConnection()
 
