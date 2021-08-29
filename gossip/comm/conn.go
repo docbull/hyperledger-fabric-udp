@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 	"sync"
 
 	udp "github.com/docbull/inlab-fabric-udp-proto"
@@ -367,8 +368,10 @@ func (conn *connection) serviceConnection() error {
 	conn.errChan = &errChan
 	conn.msgChan = &msgChan
 
-	fmt.Println("Block Receiver with", conn.peerEndpoint)
-	go conn.UDPBlockReceiver()
+	if strings.Contains(conn.peerEndpoint, "peer0.org1.example.com") {
+		fmt.Println("Block Receiver with", conn.peerEndpoint)
+		go conn.UDPBlockReceiver()
+	}
 
 	// Call stream.Recv() asynchronously in readFromStream(),
 	// and wait for either the Recv() call to end,
